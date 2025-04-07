@@ -20,6 +20,10 @@
     {
       "name": "Pavel Pevnitskiy",
       "url": "https://github.com/fljot"
+    },
+    {
+      "name": "Ali Arshad",
+      "url": "https://github.com/aliarshadpro"
     }
   ],
   "license": "Apache-2.0",
@@ -38,7 +42,7 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "conditional-type-checks": "^1.0.6",
-    "inversify": "^6.2.1",
+    "inversify": "^7.5.0",
     "jest": "^29.7.0",
     "jest-environment-jsdom": "^29.7.0",
     "react": "^19.0.0",
@@ -51,7 +55,7 @@
     "webpack-cli": "^6.0.1"
   },
   "peerDependencies": {
-    "inversify": "^5.0.5 || ^6.0.1",
+    "inversify": "^5.0.5 || ^6.0.1 || ^7.0.0",
     "react": "^16.3.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
   }
 }
