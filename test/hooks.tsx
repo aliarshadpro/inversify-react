@@ -1,368 +1,390 @@
-import 'reflect-metadata';
-import { Container, injectable, interfaces, unmanaged } from 'inversify';
-import * as React from 'react';
-import { useState } from 'react';
-import { assert, IsExact } from 'conditional-type-checks';
-import { render } from '@testing-library/react';
+import "reflect-metadata";
+import { Container, injectable, interfaces, unmanaged } from "inversify";
+import * as React from "react";
+import { useState } from "react";
+import { assert, IsExact } from "conditional-type-checks";
+import { render } from "@testing-library/react";
+import type { ContainerModule } from "inversify";
 
-import * as hooksModule from '../src/hooks'; // for jest.spyOn
+import * as hooksModule from "../src/hooks"; // for jest.spyOn
 import {
-    Provider,
-    useAllInjections,
-    useContainer,
-    useInjection,
-    useOptionalInjection,
-    useNamedInjection,
-    useTaggedInjection,
-} from '../src';
+  Provider,
+  useAllInjections,
+  useContainer,
+  useInjection,
+  useOptionalInjection,
+  useNamedInjection,
+  useTaggedInjection,
+} from "../src";
 
 // We want to test types around hooks with signature overloads (as it's more complex),
 // but don't actually execute them,
 // so we wrap test code into a dummy function just for TypeScript compiler
 function staticTypecheckOnly(_fn: () => void) {
-    return () => {};
+  return () => {};
 }
 
 function throwErr(msg: string): never {
-    throw new Error(msg);
+  throw new Error(msg);
 }
 
 @injectable()
 class Foo {
-    readonly name = 'foo';
+  readonly name = "foo";
 }
 
 @injectable()
 class Bar {
-    readonly name: string;
+  readonly name: string;
 
-    constructor(@unmanaged() tag: string) {
-        this.name = 'bar-' + tag;
-    }
+  constructor(@unmanaged() tag: string) {
+    this.name = "bar-" + tag;
+  }
 }
 
-const aName = 'a-name';
-const bName = 'b-name';
-const rootTag = 'tag';
-const aTag = 'a-tag';
-const bTag = 'b-tag';
-const multiId = Symbol('multi-id');
+const aName = "a-name";
+const bName = "b-name";
+const rootTag = "tag";
+const aTag = "a-tag";
+const bTag = "b-tag";
+const multiId = Symbol("multi-id");
 
 class OptionalService {
-    readonly label = 'OptionalService' as const;
+  readonly label = "OptionalService" as const;
 }
 
 interface RootComponentProps {
-    children?: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 const RootComponent: React.FC<RootComponentProps> = ({ children }) => {
-    const [container] = useState(() => {
-        const c = new Container();
-        c.bind(Foo).toSelf();
-        c.bind(Bar).toDynamicValue(() => new Bar('aNamed')).whenTargetNamed(aName);
-        c.bind(Bar).toDynamicValue(() => new Bar('bNamed')).whenTargetNamed(bName);
-        c.bind(Bar).toDynamicValue(() => new Bar('aTagged')).whenTargetTagged(rootTag, aTag);
-        c.bind(Bar).toDynamicValue(() => new Bar('bTagged')).whenTargetTagged(rootTag, bTag);
-        c.bind(multiId).toConstantValue('x');
-        c.bind(multiId).toConstantValue('y');
-        c.bind(multiId).toConstantValue('z');
-        return c;
-    });
-    return (
-        <Provider container={container}>
-            <div>{children}</div>
-        </Provider>
-    );
+  const [container] = useState(() => {
+    const c = new Container();
+    c.bind(Foo).toSelf();
+    c.bind(Bar)
+      .toDynamicValue(() => new Bar("aNamed"))
+      .whenParentNamed(aName);
+    c.bind(Bar)
+      .toDynamicValue(() => new Bar("bNamed"))
+      .whenParentNamed(bName);
+    c.bind(Bar)
+      .toDynamicValue(() => new Bar("aTagged"))
+      .whenParentTagged(rootTag, aTag);
+    c.bind(Bar)
+      .toDynamicValue(() => new Bar("bTagged"))
+      .whenParentTagged(rootTag, bTag);
+    c.bind(multiId).toConstantValue("x");
+    c.bind(multiId).toConstantValue("y");
+    c.bind(multiId).toConstantValue("z");
+    return c;
+  });
+  return (
+    <Provider container={container}>
+      <div>{children}</div>
+    </Provider>
+  );
 };
 
-describe('useContainer hook', () => {
-    const hookSpy = jest.spyOn(hooksModule, 'useContainer');
+describe("useContainer hook", () => {
+  const hookSpy = jest.spyOn(hooksModule, "useContainer");
+  const ChildComponent = () => {
+    const resolvedContainer = useContainer();
+    return <div>{resolvedContainer ? "container" : "no container"}</div>;
+  };
+
+  afterEach(() => {
+    hookSpy.mockClear();
+  });
+
+  // hook with overloads, so we test types
+  test(
+    "types",
+    staticTypecheckOnly(() => {
+      const container = useContainer();
+      assert<IsExact<typeof container, Container>>(true);
+
+      const valueResolvedFromContainer = useContainer((c) => {
+        assert<IsExact<typeof c, Container>>(true);
+        return c.get(Foo);
+      });
+      assert<IsExact<typeof valueResolvedFromContainer, Foo>>(true);
+    })
+  );
+
+  test("resolves container from context", () => {
+    const container = new Container();
+
+    const tree = render(
+      <Provider container={container}>
+        <ChildComponent />
+      </Provider>
+    );
+
+    const fragment = tree.asFragment();
+
+    expect(hookSpy).toHaveBeenCalledTimes(1);
+    expect(hookSpy).toHaveLastReturnedWith(container);
+    expect(fragment.children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].textContent).toEqual("container");
+  });
+
+  test("throws when no context found (missing Provider)", () => {
+    expect(() => {
+      render(<ChildComponent />);
+    }).toThrow("Cannot find Inversify container on React Context");
+
+    expect(hookSpy).toHaveBeenCalled();
+  });
+});
+
+describe("useInjection hook", () => {
+  test("resolves using service identifier (newable)", () => {
     const ChildComponent = () => {
-        const resolvedContainer = useContainer();
-        return <div>{resolvedContainer.id}</div>;
+      const foo = useInjection<Foo>(Foo);
+      return <div>{foo ? foo.name : "not found"}</div>;
     };
 
-    afterEach(() => {
-        hookSpy.mockClear();
-    });
+    const container = new Container();
+    container.bind(Foo).toSelf();
 
-    // hook with overloads, so we test types
-    test('types', staticTypecheckOnly(() => {
-        const container = useContainer();
-        assert<IsExact<typeof container, interfaces.Container>>(true);
+    const tree = render(
+      <Provider container={container}>
+        <ChildComponent />
+      </Provider>
+    );
 
-        const valueResolvedFromContainer = useContainer(c => {
-            assert<IsExact<typeof c, interfaces.Container>>(true);
-            return c.resolve(Foo);
-        });
-        assert<IsExact<typeof valueResolvedFromContainer, Foo>>(true);
-    }));
+    const fragment = tree.asFragment();
+    expect(fragment.children[0].textContent).toEqual("foo");
+  });
 
-    test('resolves container from context', () => {
-        const container = new Container();
+  test("resolves using service identifier (string)", () => {
+    const container = new Container();
+    container.bind("FooFoo").to(Foo);
 
-        const tree = render(
-            <Provider container={container}>
-                <ChildComponent/>
-            </Provider>
-        );
+    const ChildComponent = () => {
+      const foo = useInjection<Foo>("FooFoo");
+      return <div>{foo.name}</div>;
+    };
 
-        const fragment = tree.asFragment();
+    const tree = render(
+      <Provider container={container}>
+        <ChildComponent />
+      </Provider>
+    );
 
-        expect(hookSpy).toHaveBeenCalledTimes(1);
-        expect(hookSpy).toHaveLastReturnedWith(container);
-        expect(fragment.children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].textContent).toEqual(`${container.id}`);
-    });
+    const fragment = tree.asFragment();
 
-    test('throws when no context found (missing Provider)', () => {
-        expect(() => {
-            render(<ChildComponent/>);
-        }).toThrow('Cannot find Inversify container on React Context. `Provider` component is missing in component tree.');
-        // unfortunately currently it produces console.error, but it's only question of aesthetics
-        // @see https://github.com/facebook/react/issues/15520
+    expect(fragment.children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].textContent).toEqual("foo");
+  });
 
-        expect(hookSpy).toHaveBeenCalled(); // looks like React v17 actually calls it 2 times, so we can't expect specific amount
-        expect(hookSpy).toHaveReturnedTimes(0);
-    });
+  test("resolves using service identifier (symbol)", () => {
+    // NB! declaring symbol as explicit ServiceIdentifier of specific type,
+    // which gives extra safety through type inference (both when binding and resolving)
+    const identifier = Symbol("Foo") as interfaces.ServiceIdentifier<Foo>;
+
+    const container = new Container();
+    container.bind(identifier).to(Foo);
+
+    const ChildComponent = () => {
+      const foo = useInjection(identifier);
+      return <div>{foo.name}</div>;
+    };
+
+    const tree = render(
+      <Provider container={container}>
+        <ChildComponent />
+      </Provider>
+    );
+
+    const fragment = tree.asFragment();
+
+    expect(fragment.children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].textContent).toEqual("foo");
+  });
 });
 
-describe('useInjection hook', () => {
-    test('resolves using service identifier (newable)', () => {
-        const ChildComponent = () => {
-            const foo = useInjection(Foo);
-            return <div>{foo.name}</div>;
-        };
+describe("useNamedInjection hook", () => {
+  test("resolves using service identifier and name constraint", () => {
+    const ChildComponent = () => {
+      const aBar = useNamedInjection(Bar, aName);
+      const bBar = useNamedInjection(Bar, bName);
 
-        const tree = render(
-            <RootComponent>
-                <ChildComponent />
-            </RootComponent>
-        );
+      return (
+        <div>
+          {aBar.name},{bBar.name}
+        </div>
+      );
+    };
 
-        const fragment = tree.asFragment();
+    const tree = render(
+      <RootComponent>
+        <ChildComponent />
+      </RootComponent>
+    );
 
-        expect(fragment.children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].children[0].textContent).toEqual('foo');
-    });
+    const fragment = tree.asFragment();
 
-    test('resolves using service identifier (string)', () => {
-        const container = new Container();
-        container.bind('FooFoo').to(Foo);
-
-        const ChildComponent = () => {
-            const foo = useInjection<Foo>('FooFoo');
-            return <div>{foo.name}</div>;
-        };
-
-        const tree = render(
-            <Provider container={container}>
-                <ChildComponent/>
-            </Provider>
-        );
-
-        const fragment = tree.asFragment();
-
-        expect(fragment.children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].textContent).toEqual('foo');
-    });
-
-    test('resolves using service identifier (symbol)', () => {
-        // NB! declaring symbol as explicit ServiceIdentifier of specific type,
-        // which gives extra safety through type inference (both when binding and resolving)
-        const identifier = Symbol('Foo') as interfaces.ServiceIdentifier<Foo>;
-
-        const container = new Container();
-        container.bind(identifier).to(Foo);
-
-        const ChildComponent = () => {
-            const foo = useInjection(identifier);
-            return <div>{foo.name}</div>;
-        };
-
-        const tree = render(
-            <Provider container={container}>
-                <ChildComponent/>
-            </Provider>
-        );
-
-        const fragment = tree.asFragment();
-
-        expect(fragment.children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].textContent).toEqual('foo');
-    });
+    expect(fragment.children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].children[0].textContent).toEqual(
+      "bar-aNamed,bar-bNamed"
+    );
+  });
 });
 
-describe('useNamedInjection hook', () => {
-    test('resolves using service identifier and name constraint', () => {
-        const ChildComponent = () => {
-            const aBar = useNamedInjection(Bar, aName);
-            const bBar = useNamedInjection(Bar, bName);
+describe("useTaggedInjection hook", () => {
+  test("resolves using service identifier and tag constraint", () => {
+    const ChildComponent = () => {
+      const aBar = useTaggedInjection(Bar, rootTag, aTag);
+      const bBar = useTaggedInjection(Bar, rootTag, bTag);
 
-            return <div>{aBar.name},{bBar.name}</div>;
-        };
+      return (
+        <div>
+          {aBar.name},{bBar.name}
+        </div>
+      );
+    };
 
-        const tree = render(
-            <RootComponent>
-                <ChildComponent />
-            </RootComponent>
-        );
+    const tree = render(
+      <RootComponent>
+        <ChildComponent />
+      </RootComponent>
+    );
 
-        const fragment = tree.asFragment();
+    const fragment = tree.asFragment();
 
-        expect(fragment.children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].children[0].textContent).toEqual("bar-aNamed,bar-bNamed");
-    });
+    expect(fragment.children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].children[0].nodeName).toBe("DIV");
+    expect(fragment.children[0].children[0].textContent).toEqual(
+      "bar-aTagged,bar-bTagged"
+    );
+  });
 });
 
-describe('useTaggedInjection hook', () => {
-    test('resolves using service identifier and tag constraint', () => {
-        const ChildComponent = () => {
-            const aBar = useTaggedInjection(Bar, rootTag, aTag);
-            const bBar = useTaggedInjection(Bar, rootTag, bTag);
+describe("useOptionalInjection hook", () => {
+  const hookSpy = jest.spyOn(hooksModule, "useOptionalInjection");
 
-            return <div>{aBar.name},{bBar.name}</div>;
-        };
+  afterEach(() => {
+    hookSpy.mockClear();
+  });
 
-        const tree = render(
-            <RootComponent>
-                <ChildComponent />
-            </RootComponent>
-        );
+  // hook with overloads, so we test types
+  test(
+    "types",
+    staticTypecheckOnly(() => {
+      const opt = useOptionalInjection(Foo);
+      assert<IsExact<typeof opt, Foo | undefined>>(true);
 
-        const fragment = tree.asFragment();
+      const optWithDefault = useOptionalInjection(
+        Foo,
+        () => "default" as const
+      );
+      assert<IsExact<typeof optWithDefault, Foo | "default">>(true);
+    })
+  );
 
-        expect(fragment.children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].children[0].nodeName).toBe('DIV');
-        expect(fragment.children[0].children[0].textContent).toEqual("bar-aTagged,bar-bTagged");
-    });
+  test("returns undefined for missing injection/binding", () => {
+    const ChildComponent = () => {
+      const optionalThing = useOptionalInjection(OptionalService);
+      return (
+        <>{optionalThing === undefined ? "missing" : throwErr("unexpected")}</>
+      );
+    };
+
+    const tree = render(
+      <RootComponent>
+        <ChildComponent />
+      </RootComponent>
+    );
+
+    const fragment = tree.asFragment();
+
+    expect(hookSpy).toHaveBeenCalledTimes(1);
+    expect(hookSpy).toHaveReturnedWith(undefined);
+    expect(fragment.children[0].textContent).toEqual("missing");
+  });
+
+  test("resolves using fallback to default value", () => {
+    const defaultThing = {
+      label: "myDefault",
+      isMyDefault: true,
+    } as const;
+    const ChildComponent = () => {
+      const defaultFromOptional = useOptionalInjection(
+        OptionalService,
+        () => defaultThing
+      );
+      if (defaultFromOptional instanceof OptionalService) {
+        throwErr("unexpected");
+      } else {
+        assert<IsExact<typeof defaultFromOptional, typeof defaultThing>>(true);
+        expect(defaultFromOptional).toBe(defaultThing);
+      }
+
+      return <>{defaultFromOptional.label}</>;
+    };
+
+    const tree = render(
+      <RootComponent>
+        <ChildComponent />
+      </RootComponent>
+    );
+
+    const fragment = tree.asFragment();
+
+    expect(hookSpy).toHaveBeenCalledTimes(1);
+    expect(hookSpy).toHaveReturnedWith(defaultThing);
+    expect(fragment.children[0].textContent).toEqual(defaultThing.label);
+  });
+
+  test("resolves if injection/binding exists", () => {
+    const ChildComponent = () => {
+      const foo = useOptionalInjection(Foo);
+      return (
+        <>
+          {foo !== undefined
+            ? foo.name
+            : throwErr("Cannot resolve injection for Foo")}
+        </>
+      );
+    };
+
+    const tree = render(
+      <RootComponent>
+        <ChildComponent />
+      </RootComponent>
+    );
+
+    const fragment = tree.asFragment();
+
+    expect(hookSpy).toHaveBeenCalledTimes(1);
+    expect(fragment.children[0].textContent).toEqual("foo");
+  });
 });
 
-describe('useOptionalInjection hook', () => {
-    const hookSpy = jest.spyOn(hooksModule, 'useOptionalInjection');
+describe("useAllInjections hook", () => {
+  const hookSpy = jest.spyOn(hooksModule, "useAllInjections");
 
-    afterEach(() => {
-        hookSpy.mockClear();
-    });
+  afterEach(() => {
+    hookSpy.mockClear();
+  });
 
-    // hook with overloads, so we test types
-    test('types', staticTypecheckOnly(() => {
-        const opt = useOptionalInjection(Foo);
-        assert<IsExact<typeof opt, Foo | undefined>>(true);
+  test("resolves all injections", () => {
+    const ChildComponent = () => {
+      const stuff = useAllInjections(multiId);
+      return <>{stuff.join(",")}</>;
+    };
 
-        const optWithDefault = useOptionalInjection(Foo, () => 'default' as const);
-        assert<IsExact<typeof optWithDefault, Foo | 'default'>>(true);
-    }));
+    const tree = render(
+      <RootComponent>
+        <ChildComponent />
+      </RootComponent>
+    );
 
-    test('returns undefined for missing injection/binding', () => {
-        const ChildComponent = () => {
-            const optionalThing = useOptionalInjection(OptionalService);
-            return (
-                <>
-                    {optionalThing === undefined ? 'missing' : throwErr('unexpected')}
-                </>
-            );
-        };
+    const fragment = tree.asFragment();
 
-        const tree = render(
-            <RootComponent>
-                <ChildComponent/>
-            </RootComponent>
-        );
-
-        const fragment = tree.asFragment();
-
-        expect(hookSpy).toHaveBeenCalledTimes(1);
-        expect(hookSpy).toHaveReturnedWith(undefined);
-        expect(fragment.children[0].textContent).toEqual('missing');
-    });
-
-    test('resolves using fallback to default value', () => {
-        const defaultThing = {
-            label: 'myDefault',
-            isMyDefault: true,
-        } as const;
-        const ChildComponent = () => {
-            const defaultFromOptional = useOptionalInjection(OptionalService, () => defaultThing);
-            if (defaultFromOptional instanceof OptionalService) {
-                throwErr('unexpected');
-            } else {
-                assert<IsExact<typeof defaultFromOptional, typeof defaultThing>>(true);
-                expect(defaultFromOptional).toBe(defaultThing);
-            }
-
-            return (
-                <>
-                    {defaultFromOptional.label}
-                </>
-            );
-        };
-
-        const tree = render(
-            <RootComponent>
-                <ChildComponent/>
-            </RootComponent>
-        );
-
-        const fragment = tree.asFragment();
-
-        expect(hookSpy).toHaveBeenCalledTimes(1);
-        expect(hookSpy).toHaveReturnedWith(defaultThing);
-        expect(fragment.children[0].textContent).toEqual(defaultThing.label);
-    });
-
-    test('resolves if injection/binding exists', () => {
-        const ChildComponent = () => {
-            const foo = useOptionalInjection(Foo);
-            return (
-                <>
-                    {foo !== undefined ? foo.name : throwErr('Cannot resolve injection for Foo')}
-                </>
-            );
-        };
-
-        const tree = render(
-            <RootComponent>
-                <ChildComponent/>
-            </RootComponent>
-        );
-
-        const fragment = tree.asFragment();
-
-        expect(hookSpy).toHaveBeenCalledTimes(1);
-        expect(fragment.children[0].textContent).toEqual('foo');
-    });
-});
-
-describe('useAllInjections hook', () => {
-    const hookSpy = jest.spyOn(hooksModule, 'useAllInjections');
-
-    afterEach(() => {
-        hookSpy.mockClear();
-    });
-
-    test('resolves all injections', () => {
-        const ChildComponent = () => {
-            const stuff = useAllInjections(multiId);
-            return (
-                <>
-                    {stuff.join(',')}
-                </>
-            );
-        };
-
-        const tree = render(
-            <RootComponent>
-                <ChildComponent/>
-            </RootComponent>
-        );
-
-        const fragment = tree.asFragment();
-
-        expect(hookSpy).toHaveBeenCalledTimes(1);
-        expect(fragment.children[0].textContent).toEqual('x,y,z');
-    });
+    expect(hookSpy).toHaveBeenCalledTimes(1);
+    expect(fragment.children[0].textContent).toEqual("x,y,z");
+  });
 });
