@@ -81,26 +81,31 @@ const Provider: React.FC<ProviderProps> = ({
       // Create a new container with the parent container
       const newContainer = new Container({ parent: parentContainer });
 
-      // Copy all bindings from the original container to the new one
-      // In v7, we need to handle this differently since we can't directly access bindings
+      // Copy bindings from the original container to the new one
       try {
-        // We'll try to get all bound services by attempting to resolve them
-        // This is not ideal but it's the best we can do with the v7 API
+        // Get all bound services by attempting to resolve them
         const boundServices = new Set<ServiceIdentifier<unknown>>();
 
-        // First, try to get all services that are explicitly bound
-        container
-          .get<ServiceIdentifier<unknown>[]>("__inversify_types__")
-          ?.forEach((type) => {
-            try {
-              const instance = container.get(type);
-              if (instance) {
-                boundServices.add(type);
+        // Try to get all services that are explicitly bound
+        try {
+          const types = container.get<ServiceIdentifier<unknown>[]>(
+            "__inversify_types__"
+          );
+          if (Array.isArray(types)) {
+            types.forEach((type) => {
+              try {
+                const instance = container.get(type);
+                if (instance) {
+                  boundServices.add(type);
+                }
+              } catch (e) {
+                // Ignore resolution errors
               }
-            } catch (e) {
-              // Ignore resolution errors
-            }
-          });
+            });
+          }
+        } catch (e) {
+          // Ignore __inversify_types__ resolution error
+        }
 
         // Copy the bindings to the new container
         boundServices.forEach((serviceId) => {
@@ -116,10 +121,16 @@ const Provider: React.FC<ProviderProps> = ({
           }
         });
       } catch (e) {
-        console.warn(
-          "Could not copy all bindings from the original container:",
-          e
-        );
+        // Only warn if it's not the expected __inversify_types__ error
+        if (
+          !(e instanceof Error) ||
+          !e.message.includes("__inversify_types__")
+        ) {
+          console.warn(
+            "Could not copy all bindings from the original container:",
+            e
+          );
+        }
       }
 
       // Replace the original container with the new one
