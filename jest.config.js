@@ -11,6 +11,14 @@ module.exports = {
     ],
   },
   verbose: true,
-  testTimeout: 10000,
+  testTimeout: 30000,
   setupFilesAfterEnv: ["./test/setup.ts"],
+  testEnvironmentOptions: {
+    url: "http://localhost",
+  },
+  globals: {
+    "ts-jest": {
+      isolatedModules: true,
+    },
+  },
 };

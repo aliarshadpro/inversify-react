@@ -1,9 +1,14 @@
 import "reflect-metadata";
-import { Container, injectable, interfaces, unmanaged } from "inversify";
+import {
+  Container,
+  injectable,
+  unmanaged,
+  type ServiceIdentifier,
+} from "inversify";
 import * as React from "react";
 import { useState } from "react";
 import { assert, IsExact } from "conditional-type-checks";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import type { ContainerModule } from "inversify";
 
 import * as hooksModule from "../src/hooks"; // for jest.spyOn
@@ -89,7 +94,11 @@ describe("useContainer hook", () => {
   const hookSpy = jest.spyOn(hooksModule, "useContainer");
   const ChildComponent = () => {
     const resolvedContainer = useContainer();
-    return <div>{resolvedContainer ? "container" : "no container"}</div>;
+    return (
+      <div data-testid="container-result">
+        {resolvedContainer ? "container" : "no container"}
+      </div>
+    );
   };
 
   afterEach(() => {
@@ -114,18 +123,17 @@ describe("useContainer hook", () => {
   test("resolves container from context", () => {
     const container = new Container();
 
-    const tree = render(
+    render(
       <Provider container={container}>
         <ChildComponent />
       </Provider>
     );
 
-    const fragment = tree.asFragment();
-
     expect(hookSpy).toHaveBeenCalledTimes(1);
     expect(hookSpy).toHaveLastReturnedWith(container);
-    expect(fragment.children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].textContent).toEqual("container");
+    expect(screen.getByTestId("container-result")).toHaveTextContent(
+      "container"
+    );
   });
 
   test("throws when no context found (missing Provider)", () => {
@@ -141,20 +149,20 @@ describe("useInjection hook", () => {
   test("resolves using service identifier (newable)", () => {
     const ChildComponent = () => {
       const foo = useInjection<Foo>(Foo);
-      return <div>{foo ? foo.name : "not found"}</div>;
+      if (!foo) throw new Error("Foo not found");
+      return <div data-testid="result">{foo.name}</div>;
     };
 
     const container = new Container();
     container.bind(Foo).toSelf();
 
-    const tree = render(
+    render(
       <Provider container={container}>
         <ChildComponent />
       </Provider>
     );
 
-    const fragment = tree.asFragment();
-    expect(fragment.children[0].textContent).toEqual("foo");
+    expect(screen.getByTestId("result")).toHaveTextContent("foo");
   });
 
   test("resolves using service identifier (string)", () => {
@@ -163,71 +171,73 @@ describe("useInjection hook", () => {
 
     const ChildComponent = () => {
       const foo = useInjection<Foo>("FooFoo");
-      return <div>{foo.name}</div>;
+      return <div data-testid="string-id-result">{foo.name}</div>;
     };
 
-    const tree = render(
+    render(
       <Provider container={container}>
         <ChildComponent />
       </Provider>
     );
 
-    const fragment = tree.asFragment();
-
-    expect(fragment.children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].textContent).toEqual("foo");
+    expect(screen.getByTestId("string-id-result")).toHaveTextContent("foo");
   });
 
   test("resolves using service identifier (symbol)", () => {
     // NB! declaring symbol as explicit ServiceIdentifier of specific type,
     // which gives extra safety through type inference (both when binding and resolving)
-    const identifier = Symbol("Foo") as interfaces.ServiceIdentifier<Foo>;
+    const identifier = Symbol("Foo") as ServiceIdentifier<Foo>;
 
     const container = new Container();
     container.bind(identifier).to(Foo);
 
     const ChildComponent = () => {
-      const foo = useInjection(identifier);
-      return <div>{foo.name}</div>;
+      const foo = useInjection<Foo>(identifier);
+      return <div data-testid="symbol-id-result">{foo.name}</div>;
     };
 
-    const tree = render(
+    render(
       <Provider container={container}>
         <ChildComponent />
       </Provider>
     );
 
-    const fragment = tree.asFragment();
-
-    expect(fragment.children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].textContent).toEqual("foo");
+    expect(screen.getByTestId("symbol-id-result")).toHaveTextContent("foo");
   });
 });
 
 describe("useNamedInjection hook", () => {
   test("resolves using service identifier and name constraint", () => {
+    const container = new Container();
+
+    // Register Bar with named bindings
+    container
+      .bind(Bar)
+      .toDynamicValue(() => new Bar("aNamed"))
+      .whenNamed(aName);
+    container
+      .bind(Bar)
+      .toDynamicValue(() => new Bar("bNamed"))
+      .whenNamed(bName);
+
     const ChildComponent = () => {
       const aBar = useNamedInjection(Bar, aName);
       const bBar = useNamedInjection(Bar, bName);
 
       return (
-        <div>
+        <div data-testid="named-result">
           {aBar.name},{bBar.name}
         </div>
       );
     };
 
-    const tree = render(
-      <RootComponent>
+    render(
+      <Provider container={container}>
         <ChildComponent />
-      </RootComponent>
+      </Provider>
     );
 
-    const fragment = tree.asFragment();
-
-    expect(fragment.children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].children[0].textContent).toEqual(
+    expect(screen.getByTestId("named-result")).toHaveTextContent(
       "bar-aNamed,bar-bNamed"
     );
   });
@@ -235,28 +245,36 @@ describe("useNamedInjection hook", () => {
 
 describe("useTaggedInjection hook", () => {
   test("resolves using service identifier and tag constraint", () => {
+    const container = new Container();
+
+    // Register Bar with tagged bindings
+    container
+      .bind(Bar)
+      .toDynamicValue(() => new Bar("aTagged"))
+      .whenTagged(rootTag, aTag);
+    container
+      .bind(Bar)
+      .toDynamicValue(() => new Bar("bTagged"))
+      .whenTagged(rootTag, bTag);
+
     const ChildComponent = () => {
       const aBar = useTaggedInjection(Bar, rootTag, aTag);
       const bBar = useTaggedInjection(Bar, rootTag, bTag);
 
       return (
-        <div>
+        <div data-testid="tagged-result">
           {aBar.name},{bBar.name}
         </div>
       );
     };
 
-    const tree = render(
-      <RootComponent>
+    render(
+      <Provider container={container}>
         <ChildComponent />
-      </RootComponent>
+      </Provider>
     );
 
-    const fragment = tree.asFragment();
-
-    expect(fragment.children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].children[0].nodeName).toBe("DIV");
-    expect(fragment.children[0].children[0].textContent).toEqual(
+    expect(screen.getByTestId("tagged-result")).toHaveTextContent(
       "bar-aTagged,bar-bTagged"
     );
   });

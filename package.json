@@ -9,7 +9,7 @@
     "dev": "webpack --mode development -w",
     "prod": "webpack --mode production",
     "prepublishOnly": "npm run prod",
-    "test": "jest --no-cache --detectOpenHandles --forceExit",
+    "test": "jest --no-cache --detectOpenHandles",
     "test:watch": "jest --no-cache --watchAll"
   },
   "author": {
